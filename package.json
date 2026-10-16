@@ -1,0 +1,26 @@
+{
+  "name": "auth-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Autenticación reutilizable y configurable (servidor Express + componentes React)",
+  "type": "commonjs",
+  "exports": {
+    "./server": "./server/index.js",
+    "./passwords": "./server/passwords.js",
+    "./react": "./react/index.jsx",
+    "./styles.css": "./react/styles.css"
+  },
+  "files": [
+    "server",
+    "react"
+  ],
+  "scripts": {
+    "test": "node --test server/test.js"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
