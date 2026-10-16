@@ -15,38 +15,49 @@ function extractCredential(req) {
 }
 
 function createMiddleware(ctx) {
-  const { users, tokens, store, statusField, activeStatus, apiKeysEnabled } = ctx;
+  const { users, tokens, store, statusField, activeStatus, apiKeysEnabled, preciseAuthErrors } = ctx;
 
+  // Returns { status: 'ok', user } | { status: 'none' | 'invalid' | 'disabled' }.
   async function resolve(req) {
     const credential = extractCredential(req);
-    if (!credential) return null;
+    if (!credential) return { status: 'none' };
 
     let userId = null;
     if (credential.type === 'bearer') {
       const claims = tokens.verifyAccess(credential.value);
-      if (!claims) return null;
+      if (!claims) return { status: 'invalid' };
       userId = claims.sub;
     } else if (apiKeysEnabled) {
       const entry = await store.get(`apikey:${sha256(credential.value)}`);
-      if (!entry) return null;
+      if (!entry) return { status: 'invalid' };
       userId = entry.userId;
     }
-    if (userId == null) return null;
+    if (userId == null) return { status: 'invalid' };
 
     const user = await users.findById(userId);
-    if (!user) return null;
-    if (statusField && user[statusField] !== activeStatus) return null;
-    return user;
+    if (!user) return { status: 'invalid' };
+    if (statusField && user[statusField] !== activeStatus) return { status: 'disabled' };
+    return { status: 'ok', user };
   }
 
   async function requireAuth(req, res, next) {
     try {
-      const user = await resolve(req);
-      if (!user) return next(unauthorized());
-      req.user = user;
-      req.currentUser = ctx.serialize(user);
-      req.auth = { type: req.headers.authorization ? 'bearer' : 'token' };
-      return next();
+      const result = await resolve(req);
+      if (result.status === 'ok') {
+        req.user = result.user;
+        req.currentUser = ctx.serialize(result.user);
+        req.auth = { type: req.headers.authorization ? 'bearer' : 'token' };
+        return next();
+      }
+      // Precise mode distinguishes a stale/invalid credential from a disabled
+      // account; the default keeps the generic `unauthorized` for both.
+      if (preciseAuthErrors && result.status === 'disabled') {
+        return next(forbidden('Account disabled', 'account_disabled'));
+      }
+      if (preciseAuthErrors && result.status === 'invalid') {
+        return next(unauthorized('Invalid or expired session', 'invalid_token'));
+      }
+      return next(unauthorized());
     } catch (err) {
       return next(err);
     }
@@ -54,10 +65,10 @@ function createMiddleware(ctx) {
 
   async function optionalAuth(req, res, next) {
     try {
-      const user = await resolve(req);
-      if (user) {
-        req.user = user;
-        req.currentUser = ctx.serialize(user);
+      const result = await resolve(req);
+      if (result.status === 'ok') {
+        req.user = result.user;
+        req.currentUser = ctx.serialize(result.user);
       }
       return next();
     } catch (err) {
